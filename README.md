@@ -1,1488 +1,747 @@
-# DFIR - Windows Forensic Analysis
+# AppCompatCacheParser - Shimcache Parser
 
-## Windows Time Rules - $Standard_Information
+## Type of Artifact
 
-### Windows 10 v1903
+Application Compatibility Cache allows for older applications to be run on newer versions of Windows. When an executable is found, Windows determines how best to run the program and stores that data. AppCompatCache can be used to determine what was run.
 
-| Operation | Modified | Access | Metadata | Creation |
+## Basic Usage
+
+AppCompatCacheParser, use the `-f` switch and point that to the SYSTEM registry hive.
+
+In the example command below, AppCompatCacheParser is run against a SYSTEM hive. Output is stored on the G: drive to the "AppCompatCache" folder. The AppCompatCacheParser application creates an output file.
+
+```powershell
+AppCompatCacheParser.exe -f E:\Windows\System32\config\SYSTEM --csv G:\AppCompatCache
+```
+
+## Key Data Returned
+
+The columns of most significance are typically the "Path" (the location and name of the executable), "LastModifiedTimeUTC" (the last written time of the executable) and "Executed" (whether the executable was run). The most common mistake made by forensicators is that they'll assume that the LastModifiedTimeUTC value refers to the execution of the file. Don't fall into this trap!
+
+## Advanced Usage
+
+**PRO TIP:** Watch for changes at the start of the "Path". Anything that shows "SYSVOL" ran from the host's OS volume. Other volumes will be recorded by their drive letter.
+
+| Path | Last Modified Time UTC | Executed |
+|---|---:|---|
+| `SYSVOL\Windows\System32\notepad.exe` | `8/22/2019 11:00:12` | Yes |
+| `E:\TACTICAL Subject\f-response-tacsub.exe` | `8/12/2019 19:21:00` | Yes |
+
+**PRO TIP:** As a file's last written time does not change when a file is moved, renamed or copied, it may be possible to track the same executable across a single or even multiple systems, as a new entry will be created in the AppCompatCache when the file is executed from a different location or with a different name. The table below shows the same executable being run in different scenarios. We know they are all the same executable because they share the same last written time.
+
+| Path | Last Modified Time UTC | Executed |
+|---|---:|---|
+| `SYSVOL\Windows\System32\spinlock.exe` | `10/23/2019 14:27:18` | Yes |
+| `SYSVOL\Users\SRogers\AppData\Local\Temp\spinlock.exe` | `10/23/2019 14:27:18` | Yes |
+| `SYSVOL\Windows\prune.exe` | `10/23/2019 14:27:18` | Yes |
+
+# RBCmd - Recycle Bin Artifact Parser
+
+## Type of Artifact
+
+When a user deletes a file, it is sent to the Recycle Bin. During that process, it is renamed. For example, if `cat.jpg` was deleted, the deleted file would have a name such as `$R7YQ28P.jpg`. The `$R` prefix means that it contains the content (Resource) of the original file. In addition to the `$R` file, a new corresponding `$I` (Information) file is created in the Recycle Bin. The `$I` file contains the information about the original location of the file and the date and time of deletion. RBCmd takes this data and presents it in a human-readable format.
+
+## Basic Usage
+
+In this example, RBCmd is being run against a single `$I` (information) file on a mounted drive (E:). The output is displayed in the window where the command was run.
+
+```powershell
+RBCmd.exe -f E:\$Recycle.Bin\S-1-5-21-718126207-1171771683-1750804747-1001\$I7YQ28P.jpg
+```
+
+In the next example, RBCmd is being run against the parent folder of the `$I` file above, thereby parsing all of the `$I` files. This time, the output is stored in a CSV stored in `G:\RBFiles` with the date and time in the file name. Use of the `-q` switch prevents all of the output from being sent to the window, making processing faster.
+
+```powershell
+RBCmd.exe -d F:\$Recycle.Bin\S-1-5-21-718126207-1171771683-1750804747-1001 --csv G:\RBFiles -q
+```
+
+## Key Data Returned
+
+Processed Recycle Bin data is either output to the screen (if no output file is specified). The screenshot below shows an example of the output when run against a single file. The source file is shown, as is the file size, original file name and location and date of deletion.
+
+```text
+Source file: .\$IG1VEXX.xls
+Version: 1 (Pre-Windows 10)
+File size: 16384 (16KB)
+File name: C:\Users\Donald\SkyDrive\Documents\WACC Calc Spreadsheet -SECRET.xls
+Deleted on: 2013-10-21 18:32:52.5320000
+```
+
+## Advanced Usage
+
+**PRO TIP:** Running RBCmd on a mounted drive will work, but remember that when doing so, Windows does not see deleted files, so RBCmd won't pick them up. It is often worth extracting deleted `$I` files using another tool and then running RBCmd over those recovered files.
+
+# bstrings - Extract Text From Binary Files
+
+## Type of Artifact
+
+Bstrings can be used to search any type of file for potentially valuable information.
+
+## Basic Usage
+
+```powershell
+bstrings.exe -f <file>
+```
+
+Interesting options and switches:
+
+```powershell
+bstrings.exe -f <file> --ls "password"
+```
+
+Use the `-x` and `-m` switches to set maximum and minimum string lengths.
+
+Use `--off` to show the offset for each search hit.
+
+## Advanced Usage
+
+`--lr` Regular Expression searches bstrings and also contains over a dozen built-in regular expression patterns for things like credit card numbers, social security numbers, IP addresses, email addresses, and more.
+
+`-p` shows a list of built-in regular expressions. When using a built-in expression, use the value in the Name column. For example, to look for email addresses, use this command:
+
+```powershell
+bstrings.exe -f <some file> --lr email
+```
+
+bstrings also allows searching for several strings or regular expressions at once using the `--fr` and `--fs` switches.
+
+In addition to Unicode strings, bstrings looks for strings encoded using Western (1252) code page. Use the `--cp` switch to search in any other code page supported by .net.
+
+| Option/Switch | Use | Example |
+|---|---|---|
+| `--ls` | Search for string | `bstrings -f suspect.exe --ls password` |
+| `--lr` | Search with regular expression | `bstrings -f suspect.exe --lr (ntos\|win32k)` |
+| `--p` | List builtin regular expressions | `bstrings -p` |
+| `--lr XX` | The XX represents a builtin regex | `bstrings -f suspect.exe --lr ipv4` |
+| `--fr` | Read file containing regex's to use in search | `bstrings -f suspect.exe -fr DFIR_RegExs.txt` |
+| `-h` | List all options | `bstrings -h` |
+| `--cp` | Use a different ANSI code page | `bstrings -f Powershell.evtx --ls download --cp 1201` |
+
+Note: Windows Event Log require the 1201 specific code page for bstrings to find the search string.
+
+A full listing of available code pages is available at:
+
+```text
+https://goo.gl/ig6DxW
+```
+
+# SRUMECmd - SRUM Parser
+
+## Type of Artifact
+
+SRUM (System Resource Usage Manager) records application usage, network usage, power usage, etc. Investigation of this artifact can assist in determining what applications were used, while also providing context into the network connection (including names of wireless networks) that was in use at the time. SRUM can also determine how much data was uploaded and downloaded by the application and even whether a laptop was connected to power or running on battery at the time.
+
+## Basic Usage
+
+SRUMECmd takes a SRUDB.dat database and the SOFTWARE registry hive as input. However, the SRUDB.dat file must first be repaired by copying the contents of the `Windows\System32\sru` and running the following two commands in the folder containing the copied files:
+
+```powershell
+esentutl.exe /r sru /i /o
+esentutl.exe /p SRUDB.dat /o
+```
+
+Once the repair is complete, SRUMECmd can be run. In the example below SRUMECmd is being run against our newly repaired SRUDB.dat file. The `-r` (registry) switch points to the SOFTWARE registry hive on a mounted evidence file (E:). The results are output to another folder.
+
+```powershell
+SRUMECmd.exe -f G:\sru_fixed\SRUDB.dat -r E:\Windows\System32\config\SOFTWARE --csv G:\SRUM_output
+```
+
+## Key Data Returned
+
+Several CSV files will be output from running the command. Each CSV represents a different aspect of SRUM, including application resource usage, energy usage, network usage, network connections, etc. Each table is named and formatted according to the data contained therein. Note that the results are provided in time segments of 30 to 60 minutes.
+
+## Advanced Usage
+
+**PRO TIP:** As SRUM is recorded in 30-to-60-minute segments, the data can be opened in Excel and a graph plotted to show specific bandwidth and/or application usage over time. The graph output can then be used in reports to provide a clear visual of activity.
+
+# JLECmd - JumpList Explorer Command Line Edition
+
+## Type of Artifact
+
+Jumplists store critical information about files and folders that have been used in Windows. Among other things, Jumplists contain information about the application used to open target files and folders and store metadata specific to them. Those metadata contain details such as file name and location, dates and times, etc. JLECmd makes parsing this data simple and quick.
+
+## Basic Usage
+
+JLECmd takes either a single Jumplist file or a directory of Jumplists as input. If parsing a single Jumplist, use the `-f` option. If parsing a directory of Jumplists, use the `-d` option. It is also suggested that the `-q` switch be used to avoid dumping all results to the screen (which can dramatically slow down JLECmd's execution time).
+
+In the example command below, JLECmd is being run against a single Jumplist. Output is stored on the G: drive to the "Jumplists" folder.
+
+```powershell
+JLECmd.exe -f E:\Users\Donald\AppData\Microsoft\Windows\Recent\AutomaticDestinations\ff103e2cc310d0d.automaticDestinations-ms --csv G:\Jumplists -q
+```
+
+In the example command below, JLECmd is being run against all automatic jumplist files stored for the user "Donald".
+
+```powershell
+JLECmd.exe -d E:\Users\Donald\AppData\Microsoft\Windows\Recent\AutomaticDestinations --csv G:\Jumplists -q
+```
+
+## Key Data Returned
+
+The JLECmd output contains two important categories of data, evidence of execution and evidence of file knowledge. The table below shows some of the more significant columns to include in your review.
+
+| Column Name | Forensic Value |
+|---|---|
+| AppIdDescription | Human readable name for AppID |
+| DestListVersion | Used with MRU to detemine most recentely opened file in the Jump List |
+| MRU | Used with DestListVersion to detemine most recentely opened file in the Jump List |
+| Path | Location and name of file opened |
+| TargetCreated | Creation Timestamp of file referenced in JL |
+| TargetModified | Modification Timestamp of file referenced in JL |
+
+## Advanced Usage
+
+**PRO TIP:** Watch for changes in the "DriveType", "VolumeSerialNumber" and "VolumeLabel" columns as the data in these columns can indicate whether files have been opened from external devices. In the example below, the change in these columns shows that a file was opened from the USB device named "FILES".
+
+Additionally, the local path may show the same drive letter for multiple removable devices (e.g., `F:\`) but you should also review the volume serial number and the volume label to determine if the drive letter is associated with the same or different devices.
+
+| Target Modified | Drive Type | Volume Serial Number | Volume Label | Local Path |
 |---|---|---|---|---|
-| File Creation | Time of File Creation | Time of File Creation | Time of File Creation | Time of File Creation |
-| File Access | No Change | Time of Access (No Change if System Volume &gt; 128 GiB) | No Change | No Change |
-| File Modification | Time of Data Modification | Time of Data Modification | Time of Data Modification | No Change |
-| File Rename | No Change | No Change | Time of File Rename | No Change |
-| File Copy (new file) | Inherited from Original | Time of File Copy | Time of File Copy | Time of File Copy |
-| Local File Move | No Change | No Change | Time of Local File Move | No Change |
-| Volume File Move (move via CLI) | Inherited from Original | Time of File Move via CLI | Inherited from Original | Time of File Move via CLI |
-| Volume File Move (cut/paste via Explorer) | Inherited from Original | Time of Cut/Paste | Inherited from Original | Inherited from Original |
-| File Deletion (shift+delete) | No Change | No Change | No Change | No Change |
+| `9/1/2018 16:53` | Fixed storage media (Hard drive) | `7E58AAB0` | `Windows10_OS` | `C:\Users\srogers\Documents\NETFLIX SEC Filings\SEC-NFLX-1193125-12-53009.pdf` |
+| `9/27/2018 17:42` | Fixed storage media (Hard drive) | `7E58AAB0` | `Windows10_OS` | `C:\Users\srogers\Documents\Netflix 3Q13 Conference Call Announcement 09 30 13.pdf` |
+| `9/3/2018 14:13` | Removable storage media (Floppy, USB) | `B0A9FE90` | `FILES` | `F:\Forms\fy08-form-10k.pdf` |
+| `9/1/2018 16:43` | Fixed storage media (Hard drive) | `7E58AAB0` | `Windows10_OS` | `C:\Users\srogers\Documents\NETFLIX SEC Filings\SEC-NFLX-1065280-13-8.pdf` |
 
-### Windows 11 v22H2
+A mapping of app_ids to app name can be found at:
 
-| Operation | Modified | Access | Metadata | Creation |
-|---|---|---|---|---|
-| File Creation | Time of File Creation | Time of File Creation | Time of File Creation | Time of File Creation |
-| File Access | No Change | Time of Access | No Change | No Change |
-| File Modification | Time of Data Modification | Time of Data Modification² | Time of Data Modification | No Change |
-| File Rename | No Change | Time of Rename² | Time of File Rename | No Change |
-| File Copy (new file) | Inherited from Original | Time of File Copy | Inherited from Original | Time of File Copy |
-| Local File Move | No Change | Time of Local File Move | Time of Local File Move | No Change |
-| Volume File Move (move via CLI) | Inherited from Original | Time of File Move via CLI | Time of File Move via CLI | Time of File Move via CLI |
-| Volume File Move (cut/paste via Explorer) | Inherited from Original | Time of Cut/Paste | Time of Cut/Paste | Inherited from Original |
-| File Deletion (shift+delete) | No Change | No Change | No Change | No Change |
+```text
+https://for500.com/appid
+```
 
-**Notes**
+# VSCMount - Volume Shadow Copy Mounter
 
-1. Windows timestamp updates depend on OS version and the exact action sequence. Treat these rules as heuristics and test the specific action and OS version for critical evidence.
-2. Windows 11 access times should be treated as approximate because they may differ by a few seconds from actual activity.
+## Type of Artifact
 
-## Windows Artifact Analysis: Evidence of Application Execution
+Volume Shadow Copies are created periodically to capture the previous state of a system. This means that deleted and wiped files, or even older versions of a file or folder, can be recovered from volume shadow copies. VSCMount allows an investigator to mount each volume shadow copy.
 
-### Shimcache
+## Basic Usage
 
-**Description**
+Before running the VSCMount tool, an evidence file must itself be mounted as a physical drive. Once mounted, note the drive letter. In the example below it is drive letter E.
 
-The Windows Application Compatibility Database is used by Windows to identify possible application compatibility challenges with executables. It tracks the executable file path and binary last modified time.
+Open an Administrator PowerShell window and run VSCMount. In the example command below, the `--dl` switch stands for "drive letter". This is the drive letter from the evidence file mounted above. The `--mp` switch stands for "map point". In this example, the drive letter is "E". This is the location where VSCMount will create the links to all of the volume shadow copies found on the mounted evidence. In this instance, the volume shadow copies will be mapped to `C:\VSCs`.
 
-**Location**
+```powershell
+.\VSCMount.exe --dl E --mp C:\VSCs
+```
 
-- XP: SYSTEM\CurrentControlSet\Control\SessionManager\AppCompatibility
-- Win7+: SYSTEM\CurrentControlSet\Control\Session Manager\AppCompatCache
+## Key Data Returned
 
-**Interpretation**
+When run, VSCMount maps each shadow copy to a separate folder. From the example command given above, VSCMount found and mapped three volume shadow copies.
 
-Any executable present in the file system could be found in this key. Data can be particularly useful to identify the presence of malware on devices where other application execution data is missing (such as Windows servers).
-- Full path of executable
-- Windows 7+ contains up to 1,024 entries (96 entries in WinXP)
-- Post-WinXP no execution time is available
-- Executables can be preemptively added to the database prior to execution. The existence of an executable in this key does not prove actual execution.
+Inside the map point, there are three mapped volume shadow copies from the mounted E drive. Each of these can be expanded and viewed as needed.
 
-### Task Bar Feature Usage
+## Advanced Usage
 
-**Description**
+**PRO TIP:** Looking at the mapped Volume Shadow Copies, it isn't immediately clear as to when they were created. Adding the `--ud` switch to the command adds the creation date of each mapped Volume Shadow Copy, as shown in the example below:
 
-Task Bar Feature Usage tracks how a user has interacted with the taskbar.
+```powershell
+.\VSCMount.exe --dl E --mp C:\VSCs --ud
+```
 
-**Location**
+# SQLECmd - SQLite Parser
 
-Win 10 1903+: NTUSER\Software\Microsoft\Windows\CurrentVersion\Explorer\FeatureUsage
+## Type of Artifact
 
-**Interpretation**
+SQLite databases are used to store data for many applications. On a Windows computer, the most common use of SQLite is web browser data such as history, cloud storage, chat applications, phone backups, etc.
 
-- Only tracks GUI applications
-- Does not include timestamps
-- AppLaunch tracks data only for pinned applications, showing user knowledge of the application
-  - Data persists after an application is unpinned
-- AppSwitched tracks a count of application focus, showing user interaction directed at the application
-  - Not tied to pinned applications
+As each SQLite database is different, SQLECmd makes use of custom maps. These maps are created to parse specific items. For example, when parsing the Google Chrome History database, SQLECmd recognizes the database schema (layout) for application and uses the relevant map file to interpret the data specific to Google Chrome.
 
-### Amcache.hve
+## Basic Usage
 
-**Description**
+To parse a single SQLite database, point SQLECmd at a single database file using the `-f` switch.
 
-Amcache tracks installed applications, programs executed (or present), drivers loaded, and more. What sets this artifact apart is it also tracks the SHA1 hash for executables and drivers. (Available in Win7+)
+```powershell
+SQLECmd.exe -f G:\databases\database.db --csv G:\SQLECmd_output
+```
 
-**Location**
+To parse a folder of SQLite databases, point SQLECmd at the folder and use the `-d` switch.
 
-C:\Windows\AppCompat\Programs\Amcache.hve
+```powershell
+SQLECmd.exe -d G:\databases\ --csv G:\SQLECmd_output
+```
 
-**Interpretation**
+## Key Data Returned
 
-- A complete registry hive, with multiple sub-keys
-- Full path, file size, file modification time, compilation time, and publisher metadata
-- SHA1 hash of executables and drivers
-- Amcache should be used as an indication of executable and driver presence on the system, but not to prove actual execution
+Depending on the database being analyzed, several CSV files may be output. In the example of Google Chrome, pointing SQLECmd to the history database will result in history, downloads, and keyword search files, each containing their respective results.
 
-### Jump Lists
+## Advanced Usage
 
-**Description**
+**PRO TIP:** SQLECmd only parses a database if a map file exists for that schema. Due to the large number of SQLite-based applications, it is impossible to have maps for every eventuality. However, creating a custom map file is as simple as generating a SQL query and adding it to SQLECmd folder.
 
-Windows Jump Lists allow user access to frequently or recently used items quickly via the task bar. First introduced in Windows 7, they can identify applications in use and a wealth of metadata about items accessed via those applications.
+# SumECmd - User Access Log Parser
 
-**Location**
+## Type of Artifact
 
-%USERPROFILE%\AppData\Roaming\Microsoft\Windows\Recent\AutomaticDestinations
+User Access Logs are found in Windows Server operating systems. These logs records user requests related to a server. For example, if a user connects to a server, the username and client IP address are recorded with associated date and time. This can help track a user's lateral movement through the environment.
 
-**Interpretation**
+## Basic Usage
 
-- Each jump list file is named according to an application identifier (AppID). List of Jump List IDs -&gt; https://dfir.to/EZJumpList
-- Automatic Jump List Creation Time = First time an item added to the jump list. Typically, the first time an object was opened by the application.
-- Automatic Jump List Modification Time = Last time item added to the jump list. Typically, the last time the application opened an object.
+SumECmd takes the contents of the `C:\Windows\System32\LogFiles\SUM` folder as input. However, the databases stored in this folder must first be repaired by copying the contents of the folder and running the following commands on the copied files:
 
-### Last Visited MRU
+```powershell
+esentutl.exe /r svc /i /o
+esentutl.exe /p Current.mdb
+esentutl.exe /p SystemIdentity.mdb
+esentutl.exe /p <GUID>.mdb
+```
 
-**Description**
+Note that `<GUID>.mdb` is not actually named this way, the GUID will be different on every server. Once the repair is complete, SumECmd can be run. In the example below SumECmd is being run against the repaired files in the copied folder.
 
-Tracks applications in use by the user and the directory location for the last file accessed by the application.
+```powershell
+SumECmd.exe -d G:\sum_fixed\ --csv G:\sum_output
+```
 
-**Location**
+## Key Data Returned
 
-- XP: NTUSER.DAT\Software\Microsoft\Windows\CurrentVersion\Explorer\ComDlg32\LastVisitedMRU
-- Win7+: NTUSER.DAT\Software\Microsoft\Windows\CurrentVersion\Explorer\ComDlg32\ LastVisitedPidlMRU
+A series of files is output from running the command. Perhaps the most significant of the files is named ClientDetail. In this file we are provided with dates and times of when the activity occurred and Role Description (used to identify the service being accessed). In addition, the domain, username, and IP address of the incoming access is also recorded.
 
-**Interpretation**
+## Advanced Usage
 
-We get two important pieces of information from this key: applications executed by the user, and the last place in the file system that those applications interacted with. Interesting and hidden directories are often identified via this registry key.
+**PRO TIP:** Looking for domains, users and IP addresses that are not part of the organization will help to detect anomalous behavior and gives clues about the attacker.
 
-### Commands Executed in the Run Dialog
+# PECmd - Prefetch Parser
 
-**Description**
+## Type of Artifact
 
-A history of commands typed into the Run dialog box are stored for each user.
+Prefetch provides evidence of execution. Prefetch files are created or updated in the `C:\Windows\Prefetch` folder when a program attempts to run. Prefetch files are not automatically deleted if the related program is deleted and therefore can be a source of historical information.
 
-**Location**
+Prefetch is limited to 128 files, meaning that older files may be overwritten when that limit is reached. The creation time of a prefetch file is typically done so 10 seconds after first run.
 
-NTUSER\Software\Microsoft\Windows\CurrentVersion\Explorer\RunMRU
+## Basic Usage
 
-**Interpretation**
+Process a single Prefetch files and send results to screen:
 
-It is an MRU key, so it has temporal order via the MRUList key
+```powershell
+PECmd.exe -f C:\Windows\Prefetch\CMD.EXE-8E75B5BB.pf
+```
 
-### Windows 10 Timeline
+Process a directory of Prefetch files and send results to a CSV file named `prefetch.csv`. The `--csvf` allows you to provide the name of the prefetch output csv.
 
-**Description**
+```powershell
+PECmd.exe -d C:\Windows\Prefetch\ -q --csv G:\Prefetch --csvf prefetch.csv
+```
 
-Win10 records recently used applications and files in a “timeline” database in SQLite format.
+Process a directory of Prefetch files, including VSS, and send the results to a CSV file named `prefetch.csv` and higher precision timestamps:
 
-**Location**
+```powershell
+PECmd.exe -d C:\Windows\Prefetch\ -q --csv G:\Prefetch --csvf prefetch.csv --vss --mp
+```
 
-C:\Users\&lt;profile&gt;\AppData\Local\ConnectedDevicesPlatform\&lt;account-ID&gt;\ActivitiesCache.db
+## Key Data Returned
 
-**Interpretation**
+PECmd, in csv mode, will output two CSV files, one of which is a timeline. The Timeline csv will have `_Timeline` in the file name. The main Prefetch ouptut file will contain important information such as:
 
-- Full path of executed application
-- Start time, end time, and duration
-- Items opened within application
-- URLs visited
-- Databases still present even after feature deprecation in late-Win10
+- Executable name and full path from which it was executed
+- Volume name and serial number from which the program ran
+- Run Count - the number of time that the program was run, from that location
+- Timestamps (UTC) for the last eight executions
+- Volumes, files and directories accessed during execution.
 
-### BAM/DAM
+## Advanced Usage
 
-**Description**
+**KEYWORDS:** Using comma-separated list of keywords will cause any hits to be shown in red.
 
-Windows Background/Desktop Activity Moderator (BAM/DAM) is maintained by the Windows power management sub-system. (Available in Win10+)
+```powershell
+PECmd.exe -d C:\Windows\Prefetch\ -q --csv G:\Prefetch --csvf prefetch.csv -k "system32, downloads, fonts"
+```
 
-**Location**
+**PRO TIP:** PECmd can extract and process Prefetch files from Volume Shadow Copies by using the `--vss` option. This will process Prefetch from ALL Volume Shadow Copies. The output files will be separated by individual VSS numbers.
 
-- SYSTEM\CurrentControlSet\Services\bam\State\UserSettings\{SID}
-- SYSTEM\CurrentControlSet\Services\dam\State\UserSettings\{SID}
+```powershell
+PECmd.exe -d C:\Windows\Prefetch\ -q --csv G:\Prefetch --csvf prefetch.csv --vss
+```
 
-**Interpretation**
+# AmcacheParser - Amcache Parser
 
-- Provides full path of file executed and last execution date/time
-- Typically up to one week of data available
-- “State” key used in Win10 1809+
+## Type of Artifact
 
-### System Resource Usage Monitor (SRUM)
+Amcache is part of the Application Experience Service in Windows. As such, it stores information about what application was run and a hash value of the executable.
 
-**Description**
+## Basic Usage
 
-SRUM records 30 to 60 days of historical system performance including applications run, user accounts responsible, network connections, and bytes sent/received per application per hour.
+AmcacheParser takes the Amcache.hve registry hive as input.
 
-**Location**
+In the example command below, AmcacheParser is being run against an Amcache.hve registry hive. Output is stored on the G: drive to the "Amcache" folder.
 
-Win8+: C:\Windows\System32\SRU\SRUDB.dat
+```powershell
+AmcacheParser.exe -f E:\Windows\AppCompat\Programs\Amcache.hve --csv G:\Amcache
+```
 
-**Interpretation**
+## Key Data Returned
 
-- SRUDB.dat is an Extensible Storage Engine database
-- Three tables in SRUDB.dat are particularly important:
-  - {973F5D5C-1D90-4944-BE8E-24B94231A174} = Network Data Usage
-  - {d10ca2fe-6fcf-4f6d-848e-b2e99266fa89} = Application Resource Usage
-  - {DD6636C4-8929-4683-974E-22C046A43763} = Network Connectivity Usage
+The columns of most significance are typically the "FileIDLastWriteTimestamp" (the first time the executable was run), "SHA1" (the SHA-1 hash of the file being executed) and FullPath (the location and name of the executable ran). Other data of potential interest include the Volume ID (used to determine from which volume the executable was run), MFT Entry number and Sequence numbers (used to determine if the executable was run from an NTFS volume) and information about the internal metadata of the executable itself.
 
-### Prefetch
+## Advanced Usage
 
-**Description**
+**PRO TIP:** Watch for changes in the VolumeID, as these can be indicative of applications being run from external devices. In the example below, the VolumeID is different for each executable run, meaning that they were all run from different volumes even though two entries reference the `E:\` drive.
 
-Prefetch increases performance of a system by pre-loading code pages of commonly used applications. It monitors all files and directories referenced for each application or process and maps them into a .pf file. It provides evidence that an application was executed.
-- Limited to 128 files on XP and Win7
-- Up to 1024 files on Win8+
+| Volume ID | File ID Last-Write Timestamp | SHA1 | Full Path |
+|---|---:|---|---|
+| `abcd082d-3b8e-11e3-be8d-24fd52566ede` | `10/23/2013 3:09` | `f107ec56d650bf2cb00b186cbfbd202f66209ecf` | `E:\FTK Imager\FTK Imager.exe` |
+| `afd25598-3b2c-11e3-be8c-24fd52566ede` | `10/22/2013 21:42` | `ca5fd519a43ff95d1ec0bbdf3533e9392109af74` | `E:\TACTICAL Subject\f-response-tacsub.exe` |
+| `dbcc2aeb-5826-41c0-8011-f0153438122b` | `10/13/2013 9:42` | `9fef303bedf8430403915951564e0d9888f6f365` | `C:\Windows\System32\notepad.exe` |
 
-**Location**
+**PRO TIP:** Looking for something specific in the Amcache? You can use the switches `-b` (blacklist) or `-w` (whitelist). Blacklisting will include only those Amcache entries that match the SHA-1 hashes specified in the file, while whitelisting will exclude those Amcache entries that match the SHA-1 hashes. In the example below, we've provided SHA-1 values in the Blacklist.txt, meaning that the output CSV will contain items that are only responsive to the SHA-1 values in the text file.
 
-- C:\Windows\Prefetch Naming format: (exename)-(hash).pf
-- SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management\PrefetchParameters EnablePrefetcher value (0 = disabled; 3 = application launch and boot enabled)
+```powershell
+AmcacheParser.exe -f E:\Windows\AppCompat\Programs\Amcache.hve -b G:\Blacklist.txt --csv G:\Amcache
+```
 
-**Interpretation**
+# MFTECmd - MFT Explorer
 
-- Date/Time file by that name and path was first executed
-  - Creation date of .pf file (-10 seconds)
-- Date/Time file by that name and path was last executed
-  - Last modification date of .pf file (-10 seconds)
-- Each .pf file includes embedded data, including the last eight execution times (only one time available pre-Win8), total number of times executed, and device and file handles used by the program
+## Type of Artifact
 
-### CapabilityAccessManager
+MFTECmd parses a number of different files from NTFS-formatted drives. At a high level, MFTECmd parses each of these internal NTFS System files. At a lower level, the application dives deep into NTFS and helps uncover much data of interest.
 
-**Description**
+| File | Description | Contents |
+|---|---|---|
+| `$MFT` | Index of each file and folder on volume | File name timestamps, and other metadata |
+| `$Boot` | Volume boot record | Volume serial nbr, volume signature, nbr of sectors |
+| `$SDS` | File ownership | Contains a list of all the Security Descriptors on the volume |
+| `$J` | USN Journal | Transaction log of all changes to a file (write, delete, rename, etc.) (file change journal) |
+| `$Logfile` | Transaction Log File | Used by NTFS to maintain the integrity of the filesystem in the event of a crash (metadata change journal) |
 
-Records application use of the microphone, camera, and other application-specific settings.
+## Basic Usage
 
-**Location**
+MFTECmd takes a `$MFT`, `$J`, `$SDS`, `$Logfile` or `$Boot` as input.
 
-- Win 10 1903+: SOFTWARE\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ ConsentStore
-- Win 10 1903+: NTUSER\Software\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ ConsentStore
+These input files can be in the form of an exported copy of the file(s) or by referencing them from within a mounted image. The example command below shows MFTECmd being run against a `$MFT` file that has been exported from an evidence file.
 
-**Interpretation**
+```powershell
+MFTECmd.exe -f 'G:\Exports\$MFT' --csv G:\MFT_Output
+```
 
-- LastUsedTimeStart and LastUsedTimeStop track the last session times
-- The NonPackaged key tracks non-Microsoft applications
+In the next example MFTECmd is run against a `$MFT` file.
 
-### UserAssist
+```powershell
+MFTECmd.exe -f 'E:\$MFT' --csv G:\MFT_Output
+```
 
-**Description**
+Note the command line syntax for referencing the alternate data streams `$UsnJrnl` and `$Secure`.
 
-UserAssist records metadata on GUI-based program executions.
+```powershell
+MFTECmd.exe -f 'E:\$Extend\$UsnJrnl:$MFT' --csv G:\USN_Output
+MFTECmd.exe -f 'E:\$Secure:$SDS' --csv G:\SDS_Output
+```
 
-**Location**
+## Key Data Returned
 
-NTUSER.DAT\Software\Microsoft\Windows\CurrentVersion\Explorer\UserAssist\{GUID}\Count
+The columns of most significance are highly dependent on the type of investigation and the reason for parsing the files in the first place. For example, the dates and times in the `$MFT` could provide an indication as to the copying of files from external devices. If the written/modification time precedes the creation time, there is a high degree of probability that the file was copied from another volume.
 
-**Interpretation**
+In the example below, the `$MFT` has been parsed to CSV and loaded into Timeline Explorer. In each row the Last Modified time precedes the Created time. This is a clear indication that these files were copied from another volume.
 
-- GUIDs identify type of execution (Win7+)
-  - CEBFF5CD Executable File Execution
-  - F4E57C4B Shortcut File Execution
-- Values are ROT-13 Encoded
-- Application path, last run time, run count, focus time and focus count
+The processed `$J` data can be used to determine the date and time that specific actions were taken on a file. These actions include (but are not limited to) creating a new file, making changes to a file, deleting a file, overwriting a file, and renaming a file. The `$LogFile` tracks changes to the information found in the MFT such as timestamps and other metadata. In the example below follow the flow of activity the files recorded in `$J`. The first entry is for the creation of a file named `$IT74KUZ`, then data is added to the file before it is closed. Immediately afterwards, the file `sdelete64.exe` is renamed to `$RT74KUZ` before also being closed. This all happens within the same hundredth of a second as `sdeleted64.exe` being sent to the `$Recycle.bin`.
 
-## Windows Artifact Analysis: Evidence of File and Folder Opening
+A few moments later, both files are deleted as the `$Recycle.bin` is emptied.
 
-### Open/Save MRU
+The `$SDS` file allows us determine file ownership. For example, in the first screenshot below we see output from the parsed `$MFT` loaded into Timeline Explorer. Looking at the `NTUSER.DAT` entry we can see that the Security ID for this file is 8271.
 
-**Description**
+If we then go to the `$SDS` output and search for that same Security ID, we find that the `NTUSER.DAT` file is owned by the user with the Relative ID of 1001. If needed, we can take the SID and tied it to a username via the SAM Registry Hive.
 
-In the simplest terms, this key tracks files that have been opened or saved within a Windows shell dialog box. This happens to be a big data set, including Microsoft Office applications, web browsers, chat clients, and a majority of commonly used applications.
+## Advanced Usage
 
-**Location**
+**PRO TIP:** It is important to remember that NTFS stores two sets of dates and times in each `$MFT` entry. These are known as the Standard Information Attributes (SIA) and the FILENAME attributes. This means that each file and folder will have timestamps in both groups. These dates and times behave differently and can indicate when a file was truly created, not just what Windows reports. For example, in the table below we see a number of files stored under the Windows directory. The Created0x10 is the created date and time as stored in the SIA and Created0x30 relates to those stored in the FILENAME attributes.
 
-- XP: NTUSER.DAT\Software\Microsoft\Windows\CurrentVersion\Explorer\ComDlg32\OpenSaveMRU
-- Win7/8/10: NTUSER.DAT\Software\Microsoft\Windows\CurrentVersion\Explorer\ComDlg32\ OpenSavePIDlMRU
+As can be seen in the table, both dates and times are the same for the first two entries, but the third entry shows a FILENAME creation date that is much later than the creation date stored in the SIA. This may be an indication of manipulation of the SIA timestamp for the `syncmon.exe` file and would warrant further investigation.
 
-**Interpretation**
+| Created0x10 | Created0x30 | Path (combined from Parent Path and File Name) |
+|---:|---:|---|
+| `3/18/2019 09:17` | `3/18/2019 09:17` | `C:\Windows\System32\cmd.exe` |
+| `3/18/2019 09:18` | `3/18/2019 09:18` | `C:\Windows\System32\mountvol.exe` |
+| `3/18/2019 09:19` | `8/18/2019 01:12` | `C:\Windows\System32\syncmon.exe` |
 
-- The “*” key – This subkey tracks the most recent files of any extension input in an OpenSave dialog
-- .??? (Three letter extension) – This subkey stores file info from the OpenSave dialog by specific extension
+**PRO TIP:** When an evidence file is mounted as a drive MTFECmd can also dive into the volume shadow copies and retrieve previous versions of the `$MFT`, the `$J` and `$SDS` files. This can be done by virtue of the switches `--vss` and `--dedupe` as demonstrated in the command below. The `--vss` switch tells MFTECmd to search in the volume shadow copies and the `--dedupe` switch stops MFTECmd from reporting duplicate entries found in the volume shadow copies.
 
-### Recent Files
+```powershell
+MFTECmd.exe -f 'E:\$Extend\$UsnJrnl:$J' --csv G:\MFT_Output --vss --dedupe
+```
 
-**Description**
+# LECmd - LNK File Explorer
 
-Registry key tracking the last files and folders opened. Used to populate data in places like the “Recent” menus present in some Start menus.
+## Type of Artifact
 
-**Location**
+Shortcut files (`*.lnk`) are not entirely human-readable. Lnk files are most frequently created when a user opens a non-executable file by double-clicking. These shortcut files are stored under the user profile that opened the file and contain information relating to the opened target file. This includes information such as the target file dates and times, file name and path, the drive type, volume serial number, volume label and more. LECmd takes this data and presents it in a human-readable format.
 
-NTUSER.DAT\Software\Microsoft\Windows\CurrentVersion\Explorer\RecentDocs
+## Basic Usage
 
-**Interpretation**
+LECmd takes, as input, either a single lnk file or a folder containing several such files.
 
-- RecentDocs – Rollup key tracking the overall order of the last 150 files or folders opened. MRU list tracks the temporal order in which each file/ folder was opened.
-- .??? – These subkeys store the last 20 files opened by the user of each extension type. MRU list tracks the temporal order in which each file was opened. The most recently used (MRU) item is associated with the last write time of the key, providing one timestamp of file opening for each file extension type.
-- Folder – This subkey stores the last 30 folders opened by the user. The most recently used (MRU) item in this key is associated with the last write time of the key, providing the time of opening for that folder.
+In the example command below, LECmd is being run against a single lnk file. When running this command the output is shown in the window running the command (command line window or PowerShell).
 
-### MS Word Reading Locations
+```powershell
+LECmd.exe -f E:\Users\srogers\AppData\Microsoft\Windows\Recent\Peggy.jpg.lnk
+```
 
-**Description**
+In the next example, LECmd is being run against a folder of lnk files. This time, the output is stored in a CSV stored in `G:\LnkFiles`.
 
-Beginning with Word 2013, the last known position of the user within a Word document is recorded.
+```powershell
+LECmd.exe -d E:\Users\srogers\AppData\Microsoft\Windows\Recent --csv G:\LnkFiles -q
+```
 
-**Location**
+## Key Data Returned
 
-NTUSER\Software\Microsoft\Office\&lt;Version&gt;\Word\Reading Locations
+| Column Name | Forensic Value |
+|---|---|
+| AppIdDescription | Human readable name for AppID |
+| DestListVersion | Used with MRU to detemine most recentely opened file in the Jump List |
+| MRU | Used with DestListVersion to detemine most recentely opened file in the Jump List |
+| Path | Multiple Path Columns: Location and name of source and target files |
+| SourceCreate | Creation Timestamp of the LNK itself |
+| SourceModified | Modification Timestamp of the LNK itself |
+| TargetCreated | Creation Timestamp of target file the LNK points to |
+| TargetModified | Modification Timestamp of target file the LNK points to |
+| DriveType | Network, fixed local, or Removable |
+| VolumeSerialNumber | MFT Entry Number |
+| MFT Nbr & Seq nbr | MFT - Seg nbr - If present then Volume is NTFS |
 
-**Interpretation**
+## Advanced Usage
 
-- Another source tracking recent documents opened
-- The last closed time is also tracked along with the last position within the file
-- Together with the last opened date in the Office File MRU key, a last session duration can be determined
+**PRO TIP:** Taking the data from key columns not only tells a forensic investigator when the file was opened, but may also provide details about the number of times a user accessed a file with that name. In the table below, the first row of results indicates that the file was only opened once, as SourceCreated and SourceModified contain the same time. The second instance indicates that the file has been opened at least twice, as the SourceCreated occurred around seven hours before the SourceModified. We also see that the Target dates are identical, suggesting that the file has not been changed since it was created. The last row indicates that the file was only opened once, since the Source entries are identical, However, the TargetModified precedes the TargetCreated, indicating that the file has been copied to the F: drive from another location.
 
-### Last Visited MRU
+| Source Created | Source Modified | Target Created | Target Modified | Path (Combined from Local Path and Common Path) |
+|---:|---:|---:|---:|---|
+| `9/1/2018 16:53` | `9/1/2018 16:53` | `8/27/2018 09:24` | `9/6/2018 14:43` | `C:\Users\Donald\Documents\NETFLIX SEC Filings\SEC-NFLX-1193125-12-53009.pdf` |
+| `9/27/2018 10:42` | `9/27/2018 17:37` | `9/27/2018 10:28` | `9/27/2018 10:28` | `C:\Users\srogers\Documents\Netflix 3Q13 Conference Call Announcement 09 30 13.pdf` |
+| `9/3/2018 14:13` | `9/3/2018 14:13` | `9/3/2018 14:11` | `9/1/2018 18:19` | `F:\Forms\fy08-form-10k.pdf` |
 
-**Description**
+**PRO TIP:** LNK facts to keep in mind:
 
-Tracks applications in use by the user and the directory location for the last file accessed by the application.
+- The target file name extension is not always provided in the LNK name.
+- The LNK file points to the last file of that name. Meaning, if there were two files named exactly the same, the link files point to the last one opened.
 
-**Location**
+# EvtxECmd - Windows Event Log Parser
 
-- XP: NTUSER.DAT\Software\Microsoft\Windows\CurrentVersion\Explorer\ComDlg32\LastVisitedMRU
-- Win7+: NTUSER.DAT\Software\Microsoft\Windows\CurrentVersion\Explorer\ComDlg32\ LastVisitedPidlMRU
+## Type of Artifact
 
-**Interpretation**
+There are many Event Logs in the evtx folder, some aimed at system-wide events like Security.evtx, System.evtx and Application.evtx. Others may contain more specific events. All Event Logs are stored in the same format but the actual data elements collected varies. It is this variation of data elements that makes correlation of Event Logs a challenge. This is where EvtxECmd shines. All events are normalized across all event types and across all Event Logs file types!
 
-We get two important pieces of information from this key: applications executed by the user and the last place in the file system that those applications interacted with. Interesting and hidden directories are often identified via this registry key.
+The EvtxECmd parser has custom maps and locked file support. EvtxECmd has a unique feature, "Maps," that allows for consistent output.
 
-### Shortcut (LNK) Files
+Event Log Location: Event Logs for Windows Vista or later are found in:
 
-**Description**
+```text
+%systemroot%\System32\winevt\logs
+```
 
-Shortcut files are automatically created by Windows, tracking files and folders opened by a user.
+Parsing all events could end in millions of results. Using EvtxCMD's maps can help target specific artifacts.
 
-**Location**
+Check out this PowerShell script that copies out the relevant Event Logs and processes only specific Event IDs (your list of relevant logs and Event IDs may vary):
 
-- XP: %USERPROFILE%\Recent
-- Win7+: %USERPROFILE%\AppData\Roaming\Microsoft\Windows\Recent\
-- Win7+: %USERPROFILE%\AppData\Roaming\Microsoft\Office\Recent\ Note these are primary locations of LNK files. They can also be found in other locations.
+```text
+https://for500.com/evtx2process
+```
 
-**Interpretation**
+## Basic Usage
 
-- Date/Time file of that name was first opened
-  - Creation Date of Shortcut (LNK) File
-- Date/Time file of that name was last opened
-  - Last Modification Date of Shortcut (LNK) File
-- LNK Target File (Internal LNK File Information) Data:
-  - Modified, Access, and Creation times of the target file
-  - Volume Information (Name, Type, Serial Number)
-  - Network Share information
-  - Original Location
-  - Name of System
+Recursively parsing a directory of event logs is probably the most efficient way to use EvtxECmd. To parse a directory, copy Event Logs to a temporary directory and use the `-d` option. Additionally, use the `--inc` option to only include specific Event _ IDs in the processing.
 
-### Office Recent Files
+You have extracted the Event Log to a folder named `e:\evtx\logs` and now you want to process all those logs in a single command.
 
-**Description**
+```powershell
+EvtxECmd.exe -d E:\evtx\logs --csv G:\evtx\out --csvf evtxecmd_out.csv
+```
 
-MS Office programs track their own recent files list, to make it easier for users to access previously opened files.
+Process all event logs and only include event_id specified by the `--inc` option:
 
-**Location**
+```powershell
+EvtxECmd.exe -d E:\evtx\logs --csv G:\evtx\out --csvf evtxecmd_out.csv --inc 4624,4625,4634,4647,4672
+```
 
-- NTUSER.DAT\Software\Microsoft\Office\&lt;Version&gt;\&lt;AppName&gt;\File MRU
-  - 16.0 = Office 2016/2019/M365
-  - 15.0 = Office 2013
-  - 14.0 = Office 2010
-  - 12.0 = Office 2007
-  - 11.0 = Office 2003
-  - 10.0 = Office XP
-- NTUSER.DAT\Software\Microsoft\Office\&lt;Version&gt;\&lt;AppName&gt;\User MRU\LiveId_####\File MRU
-  - Microsoft 365
-- NTUSER.DAT\Software\Microsoft\Office\&lt;Version&gt;\&lt;AppName&gt;\User MRU\AD_####\File MRU
-  - Microsoft 365 (Azure Active Directory)
+Exclude specific event_id's by using the `-exc` option:
 
-**Interpretation**
+```powershell
+EvtxECmd.exe -d E:\evtx\logs --csv G:\evtx\out --csvf evtxecmd_out.csv --exc 4656,4660,4663
+```
 
-- Similar to the Recent Files registry key, this tracks the last files opened by each MS Office application
-- Unlike the Recent Files registry key, full path information is recorded along with a last opened time for each entry
+## Key Data Returned
 
-### Shell Bags
+Events without maps are still processed, but output format will vary. The normalized Event Log output makes it possible to analyze many different types of Event Logs in a single view. Timeline Explorer is perfect for this analysis.
 
-**Description**
+## Advanced Usage
 
-Shell bags identifies which folders were accessed on the local machine, via the network, and on removable devices, per user. It also shows evidence of previously existing folders still present after deletion/overwrite.
+**PRO TIP:** Process only the Event Logs and Event IDs that are relevant to your case.
 
-**Location**
+# SBECmd - Shellbags Explorer
 
-Primary Data:
-- USRCLASS.DAT\Local Settings\Software\Microsoft\Windows\Shell\Bags
-- USRCLASS.DAT\Local Settings\Software\Microsoft\Windows\Shell\BagMRU Residual Desktop Items and Network Shares:
-- NTUSER.DAT\Software\Microsoft\Windows\Shell\BagMRU
-- NTUSER.DAT\Software\Microsoft\Windows\Shell\Bags
+## Type of Artifact
 
-**Interpretation**
+Every time Windows Explorer interacts with a folder, an entry is created in the user's Shellbags. Folders also include other "Explorer Like" items like the Control Panel, zip files, ISOs, and mounted encrypted containers. The simple existence of a directory in Shellbags is evidence the specific user account once interacted with that folder. Shellbags may persist long after the original directories, files, and physical devices have since been removed.
 
-- Massive collection of data on folders accessed by each user
-- Folder file system timestamps are archived in addition to first and last interaction times
-- “Exotic” items recorded like mobile device info, control panel access, and Zip archive access
+ShellBags are a set of Windows Registry keys located in NTUser.dat and USRClass.dat Registry hives (primarily USRClass.dat) that maintain viewing preferences of folders when using Windows Explorer. We used to say the Shellbags tracked folders that a user opened.
 
-### Jump Lists
+## Basic Usage
 
-**Description**
+SBECmd uses `-d` for a directory to recursively process user registry hives. There is no `-f` option for SBECmd.
 
-Windows Jump Lists allow user access to frequently or recently used items quickly via the task bar. First introduced in Windows 7, they can identify applications in use and a wealth of metadata about items accessed via those applications.
+To process a single user's ShellBags data, use the following command:
 
-**Location**
+```powershell
+SBECmd.exe -d E:\Users\nromanoff --csv G:\temp\sbe_out
+```
 
-- %USERPROFILE%\AppData\Roaming\Microsoft\Windows\Recent\AutomaticDestinations
-- %USERPROFILE%\AppData\Roaming\Microsoft\Windows\Recent\CustomDestinations
+**PRO TIP:** If you need to process several users ShellBags data, you might consider exporting their data first and then processing just folder containing the exported data. This is a performance decision. Recursively processing many user folder and be very slow.
 
-**Interpretation**
+To process all Users in the Users folder, use the following command.
 
-- Each jump list file is named according to an application identifier (AppID). List of Jump List IDs -&gt; https://dfir.to/EZJumpList
-- Each Jump List contains a collection of items interacted with (up to ~2000 items per application)
-- Each entry is represented as a LNK shell item providing additional data
-  - Target Timestamps
-  - File Size
-  - Local Drive | Removable Media | Network Share Info
-  - Entries kept in MRU order including a timestamp for each item
+```powershell
+SBECmd.exe -d E:\Users --csv G:\tmp\sbe_out
+```
 
-### Office Trust Records
+## Key Data Returned
 
-**Description**
+File system dates and times for target folders and first and last folder interaction times. The Bag Path, Slot, Node Slot, and MRU position for each entry are also shown. These can initially be confusing to decipher in table form. Using the GUI verion of ShellBags Explorer to see the table view translated in a hierarchal tree format can be very useful.
 
-Records trust relationships afforded to documents by a user when presented with a security warning. This is stored so the user is only required to grant permission the first time the document is opened.
+### Timestamps Shown in SBECmd output
 
-**Location**
+Because of the nature of how registry key timestamps have only a single last update value for each key, the hierarchal data in the BagMRU registry key can become stale. This means that there may be a value in the key but it could be outdated. Therefore if SBECmd is not positive that a date is current and accurate, that date will not be shown in the output. This why you will often see that an entry has a Last Interacted Timestamp an no First Interacted Timestamp. The First Interacted Timestamp is stale and can't be relied upon.
 
-NTUSER\Software\Microsoft\Office\&lt;Version&gt;\&lt;AppName&gt;\Security\Trusted Documents\TrustRecords
+You will also notice that SBECmd will only show Last Interacted Timestamps for MRU values.
 
-**Interpretation**
+## Advanced Usage
 
-- Can identify documents opened by the user and user interaction in trusting the file
-- Records file path, time the document was trusted, and which permissions were granted
+**PRO TIP:** SBECmd can pull data from a live system. This make for a great learning and testing feature. Pull some baseline Shellbags data, run a test like navigating into a folder, pull the data again and compare. See what you own activity does to the Shellbags data.
 
-### Office OAlerts
+# RECmd - Registry Explorer Command Line Edition
 
-**Description**
+## Type of Artifact
 
-MS Office programs produce alerts for the user when they attempt actions such as closing a file without saving it first.
+This command line tool is used to access, search and recover, and export any data found in the WIndows Registry. To grasp why this tool is so powerful, just think about searching and exporting registry in a consistent output format. It's no big deal to do this with other tools until you have to do exactly the same thing across tens, hundreds, or thousands of machines.
 
-**Location**
+## Basic Usage
 
-OAlerts.evtx
+Search NTUSER.dat for the key name that contains "Dropbox":
 
-**Interpretation**
+```powershell
+RECmd.exe -f "C:\Temp\NTUSER.dat" --sk Dropbox
+```
 
-- All Office applications use Event ID 300
-- Events include the program name and dialog message, showing some user activity within the application
+Search UsrClass.dat for the key value that contains "Dropbox":
 
-### Internet Explorer file:///
+```powershell
+RECmd.exe -f "C:\Temp\UsrClass.dat" --sd Dropbox
+```
 
-**Description**
+Search the directory registry_files for the key value that contains "Dropbox". The last write time is >= Startdate, and the value name contains either "AppName" or "DisplayName", so don't recover deleted keys and don't process log files.
 
-Internet Explorer History databases have long held information on local and remote file access (via network shares), giving us an excellent means for determining files accessed on the system, per user. Information can be present even on Win11+ systems missing the Internet Explorer application.
+```powershell
+RECmd.exe --d "C:\Temp\registry_files" --sk "Dropbox" --StartDate "11/13/2014 15:35:01" --RegEx --sv "(App|Display)Name" --recover false --nl
+```
 
-**Location**
+RECmd will replay and apply all registry hive logs automatically. Use `--nl` to suppress this.
 
-Internet Explorer: IE6–7: %USERPROFILE%\LocalSettings\History\History.IE5 IE8–9: %USERPROFILE%\AppData\Local\Microsoft\Windows\History\History.IE5 IE10–11 & Win10+: %USERPROFILE%\AppData\Local\Microsoft\Windows\WebCache\WebCacheV*.dat
+### Search
 
-**Interpretation**
+- `StartDate` - Start date: last write timestamps (UTC)
+- `EndDate` - End date: last write timestamps (UTC)
+- `MinSize` - Find values with data size >= MinSize (specified in bytes)
+- `sk` - Search for `<string>` in key names
+- `sv` - Search for `<string>` in value names
+- `sd` - Search for `<string>` in value record's value data
+- `ss` - Search for `<string>` in value record's value slack
+- Regular expressions must of course be valid .net regular expressions
+- If either the key or value has spaces in them, enclose in quotes
+- To get default values, use a value name of "(default)"
+- "`--sX`" are search options; they use the "contains" logic
+- `-sd` will convert the compare values to ASCII and Unicode before doing comparison unless the `--l` literal switch is used
 
-- Entries recorded as: file:///C:/directory/filename.ext
-- Does not mean file was opened in a browser
+In the example command below, we are looking for large registry key (1MB and base64 encoded) that often contain malware. Deleted keys are also retrieved and parsed.
 
-## Windows Artifact Analysis: Evidence of Deleted Items and File Existence
+```powershell
+RECmd.exe -d "C:\Temp\registry_files" --minsize 1M --Base64 --recover true
+```
 
-### Thumbs.db
+To search for binary data in value data, simply string together the hex characters you want to find, separated by dashes (`04-00-EF-BE`, for example).
 
-**Description**
+```powershell
+RECmd.exe -hive "C:\Temp\registry_files" --sd "04-00-EF-BE"
+```
 
-The hidden database file is created in directories where images were viewed as thumbnails. It can catalog previous contents of a folder even upon file deletion.
+## Batch Mode
 
-**Location**
+By default, batch mode utilizes the same plugins as found in Registry Explorer and works the same way. When used by RECmd, the data from the plugin will be normalized into a standard format for CSV output. When a plugin is used to process a key or key/value, the data generated by the plugin are also saved out to a CSV. In this way, it is very similar to exporting the data from Registry Explorer (albeit to Excel vs. CSV).
 
-Each folder maintains a separate Thumbs.db file after being viewed in thumbnail view (OS version dependent)
+### Batch File
 
-**Interpretation**
+#### Header
 
-Includes:
-- Thumbnail image of original picture
-- Last Modification Time (XP Only)
-- Original Filename (XP Only)
-- Most relevant for XP systems, but Thumbs.db files can be created on more modern OS versions in unusual circumstances such as when folders are viewed via UNC paths.
+- **Description:** A general description of what this batch file is going to find
+- **Author:** Name of this batch file (can be more, too, like contact information)
+- **Version:** A version number that should be incremented as changes happen
+- **Id:** A unique (across all other batch files) GUID (Global Unique Identifier) that identifies this batch file
 
-### Windows Search Database
+#### Keys collection - Each entry consists of:
 
-**Description**
+- **Description:** A user-friendly description of what this key will find. Can be anything from the key name to a friendlier description of what it means, etc.
+- **HiveType:** The type of hive this entry corresponds to. Valid choices are NTUSER, SAM, SECURITY, SOFTWARE, SYSTEM, USRCLASS, COMPONENTS, BCD, DRIVERS, AMCACHE, SYSCACHE
+- **KeyPath:** The path to the key to look for
+- **ValueName:** OPTIONAL value that, when present, is looked for under KeyPath
+- **Recursive:** Whether or not to process KeyPath recursively
+- **Comment:** Like Description in that you can add various things here that end up in the CSV
 
-Windows Search indexes more than 900 file types, including email and file metadata, allowing users to search based on keywords.
+HiveType determines which kind of hive the entry corresponds to. This saves time in that RECmd won't search a SOFTWARE hive for keys that won't ever exist (because they are NTUSER-specific, for example).
 
-**Location**
+### Batch File Example
 
-- Win XP: C:\Documents and Settings\All Users\Application Data\ Microsoft\Search\Data\ Applications\Windows\Windows.edb
-- Win7+: C:\ProgramData\Microsoft\Search\Data\Applications\Windows\Windows.edb
-- Win7+: C:\ProgramData\Microsoft\Search\Data\Applications\Windows\GatherLogs\ SystemIndex
+Detailed, fully functional example batch files can be found in the `ZimmermanTools\RegistryExplorer\BatchExamples` folder.
 
-**Interpretation**
+Wildcards are supported in the KeyPath within the batch file. Example:
 
-- Database in Extensible Storage Engine format
-- Gather logs contain a candidate list for files to be indexed over each 24 hour period
-- Extensive file metadata and even partial content can be present
+```text
+SOFTWARE\Microsoft\Office\*\*\User MRU\*
+```
 
-### Internet Explorer file:///
+To use batch mode, supply the file to the `--bn` switch, along with `--csv` to tell RECmd where to save results:
 
-**Description**
+- Export UserAssist data via RECmd batch file that uses a Registry Explorer plugin
 
-Internet Explorer History databases have long held information on local and remote (via network shares) file access, giving us an excellent means for determining files accessed on the system, per user. Information can be present even on Win11+ systems missing the Internet Explorer application.
+```powershell
+RECmd.exe --bn .\BatchExamples\BatchExampleUserAssist.reb -f C:\Temp\NTUSER_dblake.DAT --nl --csv C:\Temp
+```
 
-**Location**
+- Export Registry many of the Registry Explorer Plugin CSVs using a batch file
 
-- IE6-7: %USERPROFILE%\LocalSettings\History\History.IE5
-- IE8-9: %USERPROFILE%\AppData\Local\Microsoft\Windows\History\History.IE5
-- IE10-11 and Win10+: %USERPROFILE%\AppData\Local\Microsoft\Windows\WebCache\WebCacheV*.dat
+```powershell
+RECmd.exe --bn .\BatchExamples\RECmd_Batch_MC.reb -d G:\blake\Registry\E --nl --csv g:\blake\recmd_out
+```
 
-**Interpretation**
+**PRO TIP:** Be as specific as possible about the directory to process as it can have a significant impact on performance. These two commands generate the same results but the second one runs much faster.
 
-- Entries are recorded as: file:///C:/&lt;directory&gt;/&lt;filename&gt;.&lt;ext&gt;
-- It does not mean the file was opened in a browser
+This is much slower because the RECmd has to process the entire drive.
 
-### Search – WordWheelQuery
+```powershell
+RECmd.exe --bn "C:\Forensic Program Files\ZimmermanTools\RegistryExplorer\BatchExamples\UserActivity.reb" -d G:\blake\Registry\E --nl --csv g:\blake\registry\recmd_out
+```
 
-**Description**
+This is much faster because RECmd is only processing a single user directory.
 
-This maintains an ordered list of terms put into the File Explorer search dialog.
+```powershell
+RECmd.exe --bn "C:\Forensic Program Files\ZimmermanTools\RegistryExplorer\BatchExamples\UserActivity.reb" -d G:\blake\Registry\E\Users\Donald --nl --csv g:\blake\registry\recmd_out
+```
 
-**Location**
+**PRO TIP:** A RECmd batch file can contain instructions for processing different Hives & Keys. Using the `-f` option allows you to target a specific hive instead, if desired, all hives mentioned in the batch file.
 
-Win7+: NTUSER.DAT\Software\Microsoft\Windows\CurrentVersion\Explorer\WordWheelQuery
+When RECmd runs in batch mode, several files will get generated in the `--csv` directory (see the example below).
 
-**Interpretation**
+# WxTCmd - Timeline Explorer
 
-Keywords are added in Unicode and listed in temporal order in an MRUlist
+## Type of Artifact
 
-### User Typed Paths
+The 1803 update of Windows 10 introduced the Timeline feature. This keeps a record of the last 30 days of applications and files opened by a given user. The data for this are also synchronized from other computers where the user has logged in with their Microsoft account.
 
-**Description**
+## Basic Usage
 
-A user can type a path directly into the File Explorer path bar to locate a file instead of navigating the folder structure. Folders accessed in this manner are recorded in the TypedPaths key.
+WxTCmd takes a single ActivitiesCache.db file as input. Output for this command is not output to the screen, so a CSV needs to be specified.
 
-**Location**
+In the example command below, WxTCmd is being run against the ActivitiesCache.db file. Note that the subfolder named `a3936c317ac1474e` is not consistent. An equivalent, differently named folder will be present for other users.
 
-NTUSER\Software\Microsoft\Windows\CurrentVersion\Explorer\TypedPaths
+```powershell
+WxTCmd.exe -f E:\Users\srogers\AppData\Local\ConnectedDevicesPlatform\a393c317ac1474e\ActivitiesCache.db
+```
 
-**Interpretation**
+## Key Data Returned
 
-- This indicates a user had knowledge of a particular file system location
-- It can expose hidden and commonly accessed locations, including those present on external drives or network shares
+There are several columns of potential interest in a forensic investigation. The "Executable" column provides the name and the path of the executable in use. For example, `Program Files x86\Adobe\Acrobat Reader DC\Reader\Acrord32.exe` would show that Acrobat Reader was opened. "Display Text" provides information regarding the content opened and the application used. For example, `Tax Documents.pdf (Acrobat Reader DC)` would indicate that the file `Tax Documents.pdf` was opened using Acrobat Reader. "Content Info" provides information relating to the location of the item that was opened. Following the same example as above, `C:\Users\lee _ w\Desktop\Tax Documents.pdf` would indicate the location of the file that was opened. There are also various dates and times recorded in the Timeline. "Start Time" indicates the first time, in the last 30 days, that this specific activity occurred.
 
-### Thumbcache
+## Advanced Usage
 
-**Description**
-
-Thumbnails of pictures, documents, and folders exist in a set of databases called the thumbcache. It is maintained for each user based on the thumbnail sizes viewed (e.g., small, medium, large, and extra large). It can catalog previous contents of a folder even upon file deletion. (Available in Windows Vista+)
-
-**Location**
-
-%USERPROFILE%\AppData\Local\Microsoft\Windows\Explorer
-
-**Interpretation**
-
-- Database files are named similar to: Thumbcache_256.db
-- Each database file represents thumbnails stored as different sizes or to fit different user interface components
-- Thumbnail copies of pictures can be extracted and the Thumbnail Cache ID can be cross-referenced within the Windows Search Database to identify filename, path, and additional file metadata
-
-### Recycle Bin
-
-**Description**
-
-The recycle bin collects items soft-deleted by each user and associated metadata—only relevant for recycle-bin aware applications.
-
-**Location**
-
-Hidden System Folder
-- Win XP: C:\Recycler
-- Win7+: C:\$Recycle.Bin
-
-**Interpretation**
-
-- Each user is assigned a SID sub-folder that can be mapped to a user via the Registry
-- XP: INFO2 database contains deletion times and original filenames
-- Win7+: Files preceded by $I###### contain original filename and deletion date/time
-- Win7+: Files preceded by $R###### contain original deleted file contents
-
-## Browser Activity
-
-### History and Download History
-
-**Description**
-
-History and Download History records websites visited by date and time.
-
-**Location**
-
-Firefox
-- XP: %USERPROFILE%\Application Data\Mozilla\Firefox\Profiles\&lt;randomtext&gt;.default\places.sqlite
-- Win7+: %USERPROFILE%\AppData\Roaming\Mozilla\Firefox\Profiles\&lt;random text&gt;.default\ places.sqlite Chrome/Edge
-- XP: %USERPROFILE%\Local Settings\Application Data\Google\Chrome\User Data\&lt;Profile&gt;\History
-- Win7+: %USERPROFILE%\AppData\Local\Google\Chrome\User Data\&lt;Profile&gt;\History
-- Win7+: %USERPROFILE%\AppData\Local\Microsoft\Edge\User Data\&lt;Profile&gt;\History
-
-**Interpretation**
-
-- Web browser artifacts are stored for each local user account
-- Most browsers also record number of times visited (frequency)
-- Look for multiple profiles in Chromium browsers, including “Default”, and “Profile1”, etc.
-
-### Media History
-
-**Description**
-
-Media History tracks media usage (audio and video played) on visited websites (Chromium browsers).
-
-**Location**
-
-Chrome/Edge
-- %USERPROFILE%\AppData\Local\Google\Chrome\User Data\&lt;Profile&gt;\Media History
-- %USERPROFILE%\AppData\Local\Microsoft\Edge\User Data\&lt;Profile&gt;\Media History
-
-**Interpretation**
-
-- Three primary tables: playbackSession, origin, playback
-- Includes URLs, last play time, watch time duration, and last video position
-- Not cleared when other history data is cleared
-
-### HTML5 Web Storage
-
-**Description**
-
-HTML5 Web Storage are considered to be “Super Cookies”. Each domain can store up to 10MB of text-based data on the local system.
-
-**Location**
-
-Firefox
-- %USERPROFILE%\AppData\Roaming\Mozilla\Firefox\Profiles\&lt;randomtext&gt;.default\webappstore.sqlite Chrome/Edge
-- %USERPROFILE%\AppData\Local\Google\Chrome\User Data\&lt;Profile&gt;\Local Storage
-- %USERPROFILE%\AppData\Local\Microsoft\Edge\User Data\&lt;Profile&gt;\Local Storage
-
-**Interpretation**
-
-Chrome uses a LevelDB database, Firefox uses SQLite, and IE/EdgeHTML store data within XML files
-
-### HTML5 FileSystem
-
-**Description**
-
-HTML5 FileSystem implements the HTML5 local storage FileSystem API. It is similar to Web Storage, but designed to store larger binary data.
-
-**Location**
-
-Chrome/Edge
-- %USERPROFILE%\AppData\Local\Google\Chrome\User Data\&lt;Profile&gt;\File System
-- %USERPROFILE%\AppData\Local\Microsoft\Edge\User Data\&lt;Profile&gt;\File System
-
-**Interpretation**
-
-- A LevelDB database in this folder stores visited URLs and assigned subfolders to locate the data
-- Files are stored temporarily (“t” subfolders) or in permanent (“p” subfolders) storage
-
-### Auto-Complete Data
-
-**Description**
-
-Many databases store data that a user has typed into the browser.
-
-**Location**
-
-Firefox
-- %USERPROFILE%\AppData\Roaming\Mozilla\Firefox\Profiles\&lt;randomtext&gt;.default\places.sqlite
-- %USERPROFILE%\AppData\Roaming\Mozilla\Firefox\Profiles\&lt;randomtext&gt;.default\ formhistory.sqlite Chrome/Edge
-- %USERPROFILE%\AppData\Local\Google\Chrome\User Data\&lt;Profile&gt;\History
-- %USERPROFILE%\AppData\Local\Microsoft\Edge\User Data\&lt;Profile&gt;\History
-  - keyword_search_terms – items typed into various search engines
-- %USERPROFILE%\AppData\Local\Google\Chrome\User Data\&lt;Profile&gt;\Web Data
-- %USERPROFILE%\AppData\Local\Microsoft\Edge\User Data\&lt;Profile&gt;\ Web Data
-  - Items typed into web forms
-- %USERPROFILE%\AppData\Local\Google\Chrome\User Data\&lt;Profile&gt;\Shortcuts
-- %USERPROFILE%\AppData\Local\Microsoft\Edge\User Data\&lt;Profile&gt;\ Shortcuts
-  - Items typed in the Chrome URL address bar (Omnibox)
-- %USERPROFILE%\AppData\Local\Google\Chrome\User Data\&lt;Profile&gt;\Network Action Predictor
-- %USERPROFILE%\AppData\Local\Microsoft\Edge\User Data\&lt;Profile&gt;\ Network Action Predictor
-  - Records what was typed, letter by letter
-- %USERPROFILE%\AppData\Local\Google\Chrome\User Data\&lt;Profile&gt;\Login Data
-- %USERPROFILE%\AppData\Local\Microsoft\Edge\User Data\&lt;Profile&gt;\ Login Data
-  - Stores inputted user credentials
-
-**Interpretation**
-
-- Includes typed-in data, as well as data types
-- Connects typed data and knowledge to a user account
-
-### Browser Preferences
-
-**Description**
-
-Configuration data associated with the browser application, including privacy settings and synchronization preferences.
-
-**Location**
-
-Firefox
-- %USERPROFILE%\AppData\Roaming\Mozilla\Firefox\Profiles\&lt;randomtext&gt;.default\prefs.js Chrome/Edge
-- %USERPROFILE%\AppData\Local\Google\Chrome\User Data\&lt;Profile&gt;\Preferences
-- %USERPROFILE%\AppData\Local\Microsoft\Edge\User Data\&lt;Profile&gt;\Preferences
-
-**Interpretation**
-
-- Firefox prefs.js shows sync status, last sync time, and artifacts selected to sync
-- Chrome uses JSON format
-  - per_host_zoom_levels, media-engagement, and site_engagement can help to show user interaction
-  - Contains synchronization status, last sync time and artifacts selected to sync
-- Edge preferences include account_info, clear_data_on_exit, and sync settings
-
-### Cache
-
-**Description**
-
-The cache is where web page components can be stored locally to speed up subsequent visits.
-
-**Location**
-
-Firefox
-- XP: %USERPROFILE%\Local Settings\Application Data\Mozilla\Firefox\Profiles\&lt;randomtext&gt;. default\Cache Firefox 31-
-- Win7+: %USERPROFILE%\AppData\Local\Mozilla\Firefox\Profiles\&lt;randomtext&gt;.default\Cache Firefox 32+
-- Win7+: %USERPROFILE%\AppData\Local\Mozilla\Firefox\Profiles\&lt;randomtext&gt;.default\cache2 Chrome/Edge
-- XP: %USERPROFILE%\Local Settings\Application Data\Google\Chrome\User Data\&lt;Profile&gt;\Cache - data_# and f_######
-- Win7+: %USERPROFILE%\AppData\Local\Google\Chrome\User Data\&lt;Profile&gt;\Cache\ - data_# and f_######
-- Win7+: %USERPROFILE%\AppData\Local\Microsoft\Edge\User Data\&lt;Profile&gt;\Cache\ - data_# and f_######
-
-**Interpretation**
-
-- Gives the investigator a “snapshot in time” of what a user was looking at online
-- Identifies websites which were visited
-- Provides the actual files the user viewed on a given website
-- Similar to all browser artifacts, cached files are tied to a specific local user account
-- Timestamps show when the site was first saved and last viewed
-
-### Bookmarks
-
-**Description**
-
-Bookmarks include default items, as well as those the user chose to save for future reference.
-
-**Location**
-
-Firefox 3+
-- %USERPROFILE%\AppData\Roaming\Mozilla\Firefox\Profiles\&lt;randomtext&gt;.default\places.sqlite
-- %USERPROFILE%\AppData\Roaming\Mozilla\Firefox\Profiles\&lt;randomtext&gt;.default\ bookmarkbackups\bookmarks-&lt;date&gt;.jsonlz4 Chrome/Edge
-- %USERPROFILE%\AppData\Local\Google\Chrome\User Data\&lt;Profile&gt;\Bookmarks
-- %USERPROFILE%\AppData\Local\Microsoft\Edge\User Data\&lt;Profile&gt;\Bookmarks
-- %USERPROFILE%\AppData\Local\Google\Chrome\User Data\&lt;Profile&gt;\Bookmarks.bak
-- %USERPROFILE%\AppData\Local\Microsoft\Edge\User Data\&lt;Profile&gt;\Bookmarks.msbak
-
-**Interpretation**
-
-- Provides the website of interest and the specific URL that was saved
-- Firefox bookmarkbackups folder can contain multiple backup copies of bookmarks in JSON format. Field names match those in places.sqlite
-- Chromium Bookmark files are in JSON format
-- Note: not all bookmarks are user-generated; it is possible to bookmark a site and never visit it
-
-### Stored Credentials
-
-**Description**
-
-Browser-based credential storage typically uses Windows DPAPI encryption. If the login account is a Microsoft cloud account in Windows 10 or 11, DPAPI uses a 44-character randomly generated password in lieu of the account password.
-
-**Location**
-
-Firefox
-- %USERPROFILE%\AppData\Roaming\Mozilla\Firefox\Profiles\logins.json Chrome/Edge
-- %USERPROFILE%\AppData\Local\Google\Chrome\User Data\&lt;Profile&gt;\Login Data
-- %USERPROFILE%\AppData\Local\Microsoft\Edge\User Data\&lt;Profile&gt;\Login Data
-
-**Interpretation**
-
-- Firefox stores the hostname and URL, creation time, last used time, times used, and time of last password change in JSON format.
-- Chromium-based browsers use a SQLite database and include the origin URL, action URL, username, date created, and date last used.
-- Credential metadata can be available even if actual credentials are encrypted. Actual credentials are easiest to retrieve on a live system with the user account logged in.
-
-### Browser Downloads
-
-**Description**
-
-Modern browsers include built-in download manager applications capable of keeping a history of every file downloaded by the user. This browser artifact can provide excellent information about websites visited and corresponding items downloaded.
-
-**Location**
-
-Firefox 3-25
-- %USERPROFILE%\AppData\Roaming\Mozilla\ Firefox\Profiles\&lt;random text&gt;.default\ downloads.sqlite Firefox 26+
-- %USERPROFILE%\AppData\Roaming\Mozilla\Firefox\Profiles\&lt;randomtext&gt;.default\places.sqlite
-  - moz_annos table Chrome/Edge
-- %USERPROFILE%\AppData\Local\Google\Chrome\User Data\&lt;Profile&gt;\History
-- %USERPROFILE%\AppData\Local\Microsoft\Edge\User Data\&lt;Profile&gt;\History
-  - downloads and download_url_chains tables
-
-**Interpretation**
-
-Download metadata includes:
-- Filename, size, and type
-- Source website and referring page
-- Download start and end times
-- File system save location
-- State information including success and failure
-
-### Extensions
-
-**Description**
-
-Browser functionality can be extended through the use of extensions, or browser plugins.
-
-**Location**
-
-Firefox 4-25
-- %USERPROFILE%\AppData\Roaming\Mozilla\Firefox\Profiles\&lt;randomtext&gt;.default\extensions.sqlite
-- %USERPROFILE%\AppData\Roaming\Mozilla\Firefox\Profiles\&lt;randomtext&gt;.default\addons.sqlite Firefox 26+
-- %USERPROFILE%\AppData\Roaming\Mozilla\Firefox\Profiles\&lt;randomtext&gt;.default\addons.json
-- %USERPROFILE%\AppData\Roaming\Mozilla\Firefox\Profiles\&lt;randomtext&gt;.default\extensions.json Chrome/Edge
-- %USERPROFILE%\AppData\Local\Google\Chrome\User Data\&lt;Profile&gt;\Extensions\&lt;GUID&gt;\&lt;version&gt;
-- %USERPROFILE%\AppData\Local\Microsoft\Edge\User Data\&lt;Profile&gt;\Extensions\&lt;GUID&gt;\&lt;version&gt;
-
-**Interpretation**
-
-- The newer Firefox JSON format stores more information than in older versions
-  - Extension name, installation source, installation time, last update, and plugin status
-- Chrome/Edge extensions each have their own folder on the local system, named with a GUID, containing the code and metadata
-  - Creation time of the folder indicates the installation time for the extension. Beware that extensions can be synced across devices affecting the interpretation of this timestamp.
-  - A manifest.json file provides plugin details including name, URL, permissions, and version.
-  - The preferences file can also include additional extension data
-
-### Session Restore
-
-**Description**
-
-Automatic crash recovery features are built into the browser.
-
-**Location**
-
-Firefox (older versions)
-- Win7+: %USERPROFILE%\AppData\Roaming\Mozilla\Firefox\Profiles\&lt;randomtext&gt;.default\ sessionstore.js Firefox (newer versions)
-- Win7+: %USERPROFILE%\AppData\Roaming\Mozilla\Firefox\Profiles\&lt;randomtext&gt;.default\ sessionstore.jsonlz4
-- Win7+: %USERPROFILE%\AppData\Roaming\Mozilla\Firefox\Profiles\&lt;randomtext&gt;.default\ sessionstore-backups\ Chrome/Edge (older versions)
-- Win7+: %USERPROFILE%\AppData\Local\Google\Chrome\User Data\&lt;Profile&gt;\
-- Win7+: %USERPROFILE%\AppData\Local\Microsoft\Edge\User Data\&lt;Profile&gt;\
-  - Restore files = Current Session, Current Tabs, Last Session, Last Tabs Chrome/Edge (newer versions)
-- Win7+: %USERPROFILE%\AppData\Local\Google\Chrome\User Data\&lt;Profile&gt;\Sessions
-- Win7+: %USERPROFILE%\AppData\Local\Microsoft\Edge\User Data\&lt;Profile&gt;\Sessions
-  - Restore files = Session_&lt;timestamp&gt;, Tabs_&lt;timestamp&gt;
-
-**Interpretation**
-
-- Historical websites viewed in each tab
-- Referring websites
-- Time session started or ended
-- HTML, JavaScript, XML, and form data from the page
-- Other artifacts such as transition type, browser window size and pinned tabs
-
-### Cookies
-
-**Description**
-
-Cookies provide insight into what websites have been visited and what activities might have taken place there.
-
-**Location**
-
-Firefox
-- XP: %USERPROFILE%\Application Data\Mozilla\Firefox\Profiles\&lt;randomtext&gt;.default\cookies.sqlite
-- Win7+: %USERPROFILE%\AppData\Roaming\Mozilla\Firefox\Profiles\&lt;randomtext&gt;.default\ cookies.sqlite Chrome/Edge
-- XP: %USERPROFILE%\Local Settings\Application Data\Google\Chrome\User Data\&lt;Profile&gt;\Cookies
-- Win7+: %USERPROFILE%\AppData\Local\Google\Chrome\User Data\&lt;Profile&gt;\Network\Cookies
-- Win7+: %USERPROFILE%\AppData\Local\Microsoft\Edge\User Data\&lt;Profile&gt;\Network\Cookies
-
-## Cloud Storage
-
-### OneDrive
-
-**Description**
-
-OneDrive is installed by default on Windows 8+ systems, although it must be enabled by a user authenticating to their Microsoft Cloud account before use.
-
-**Location**
-
-Default local file storage:
-- %USERPROFILE%\OneDrive (Personal)
-- %USERPROFILE%\OneDrive - &lt;CompanyName&gt; (Business) File storage folder location info:
-- NTUSER\Software\Microsoft\OneDrive\Accounts\&lt;Personal | Business1&gt; File metadata:
-- %USERPROFILE%\AppData\Local\Microsoft\OneDrive\logs\&lt;Personal | Business1&gt;
-  - SyncDiagnostics.log
-  - SyncEngine “odl” logs
-- %USERPROFILE%\AppData\Local\Microsoft\OneDrive\settings\&lt;Personal | Business1&gt;
-  - &lt;UserCid&gt;.dat
-
-**Interpretation**
-
-- It is critical to check the registry to confirm the local file storage location
-- Metadata files only exist if OneDrive is enabled
-- SyncDiagnostics.log can sometimes contain file metadata
-- Some files are only stored in the cloud and will not be stored locally
-- Deleted items are stored in an online recycle bin for up to 30 days (personal) or 93 days (business)
-- OneDrive for Business Unified Audit Logs in Microsoft 365 provide 90 days of user activity logging
-
-### Google Drive for Desktop
-
-**Description**
-
-Google Drive for Desktop is the new name for the merged Google Backup and Sync and File Stream applications. It uses a virtual FAT32 volume named “My Drive”, which is only accessible to the user when they are logged in.
-
-**Location**
-
-Local drive letter for the virtual volume and account ID:
-- NTUSER\Software\Google\DriveFS\Share\ Default local file cache:
-- %USERPROFILE%\AppData\Local\Google\DriveFS\&lt;account identifier&gt;\content_cache File metadata:
-- %USERPROFILE%\AppData\Local\Google\DriveFS\&lt;account identifier&gt;\metadata_sqlite_db
-
-**Interpretation**
-
-- Assigned drive letter can help tie file and folder access artifacts to Google Drive
-- Google Workspace Admin Reports provide 180 days of user activity logging
-- metadata_sqlite_db database uses protobuf format for many important fields
-
-### Box Drive
-
-**Description**
-
-Box Drive uses a virtual filesystem, implemented as an NTFS reparse point. Excellent metadata logging is available.
-
-**Location**
-
-Default reparse point to virtual filesystem:
-- %USERPROFILE%\Box Default local file cache:
-- %USERPROFILE%\AppData\Local\Box\Box\cache File metadata and configuration data:
-- %USERPROFILE%\AppData\Local\Box\Box\logs
-  - Box_Streem logs
-- %USERPROFILE%\AppData\Local\Box\Box\data
-  - sync.db & streemsfs.db databases – file metadata
-  - metrics.db – user account info
-
-**Interpretation**
-
-- Metadata available for both local and cloud-only files, including SHA1 hashes
-- A search for the value “logDriveInformation” within the Box_ Streem logs can identify the location of the virtual filesystem folder if it is not apparent
-- Detailed usage logging available, but may only go back a few weeks
-
-### Dropbox
-
-**Description**
-
-Dropbox can be a challenging application to investigate. Older versions encrypt most metadata using Windows DPAPI, but recent versions tend to have more information available.
-
-**Location**
-
-Default local file storage:
-- %USERPROFILE%\Dropbox
-- %USERPROFILE%\Dropbox\.dropbox.cache (up to 3 days of cached data) File storage folder location:
-- SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\SyncRootManager\ Dropbox!&lt;SID&gt;!Personal\UserSyncRoots File metadata and configuration data:
-- %USERPROFILE%\AppData\Local\Dropbox\
-  - nucleus.sqlite3, sync_history.db, and aggregation.dbx – usage and file metadata
-  - v90-: filecache.dbx, config.dbx – encrypted with Windows DPAPI
-  - info.json – app configuration data
-
-**Interpretation**
-
-- Metadata for local, cloud, and deleted files can all be identified
-- Deleted files can exist in both the local and online recycle bins. Online recycle bin retention is 30 days (personal) or 120 days (business)
-- Dropbox business “advanced tier” provides detailed logging while consumer Dropbox provides only limited logs via “Events” page
-
-## Account Usage
-
-### Cloud Account Details
-
-**Description**
-
-Microsoft Cloud Accounts store account information in the SAM hive, including the email address associated with the account.
-
-**Location**
-
-SAM\Domains\Account\Users\&lt;RID&gt;\InternetUserName
-
-**Interpretation**
-
-- InternetUserName value contains the email address tied to the account
-- The presence of this value identifies the account as a Microsoft cloud account
-
-### Last Login and Password Change
-
-**Description**
-
-The SAM registry hive maintains a list of local accounts and associated configuration information.
-
-**Location**
-
-SAM\Domains\Account\Users
-
-**Interpretation**
-
-- Accounts listed by their relative identifiers (RID)
-- Last login time, last password change, login counts, group membership, account creation time and more can be determined
-
-### Service Events
-
-**Description**
-
-Analyze logs for suspicious Windows service creation, persistence, and services started or stopped around the time of a suspected compromise. Service events also record account information.
-
-**Location**
-
-- Win7+: %SYSTEM ROOT%\System32\winevt\logs\System.evtx
-- Win10+: %SYSTEM ROOT%\System32\winevt\logs\Security.evtx
-
-**Interpretation**
-
-- Most relevant events are present in the System Log:
-  - 7034 – Service crashed unexpectedly
-  - 7035 – Service sent a Start/Stop control
-  - 7036 – Service started or stopped
-  - 7040 – Start type changed (Boot | On Request | Disabled)
-  - 7045 – A service was installed on the system (Win2008R2+)
-- Auditing can be enabled in the Security log on Win10+:
-  - 4697 – A service was installed on the system (from Security log)
-- A large amount of malware and worms in the wild utilize Services
-- Services started on boot illustrate persistence (desirable in malware)
-- Services can crash due to attacks like process injection
-
-### User Accounts
-
-**Description**
-
-Identify both local and domain accounts with interactive logins to the system.
-
-**Location**
-
-SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList
-
-**Interpretation**
-
-- Useful for mapping SID to user account name
-- Subkeys are named for user SIDs and contain a ProfileImagePath indicating the user’s profile path
-
-### Remote Desktop Protocol (RDP) Usage
-
-**Description**
-
-Track RDP logons and session reconnections to target machines.
-
-**Location Security Log**
-
-Win7+: %SYSTEM ROOT%\System32\winevt\logs\Security.evtx
-
-**Interpretation**
-
-- Multiple events can be used to track accounts used for RDP
-  - Event ID 4624 – Logon Type 10
-  - Event ID 4778 – Session Connected/Reconnected
-  - Event ID 4779 – Session Disconnected
-- Event log provides hostname and IP address of remote machine making the connection
-- Multiple dedicated RDP/Terminal Services logs are also available on modern Windows versions
-
-### Successful/Failed Logons
-
-**Description**
-
-Profile account creation, attempted logons, and account usage.
-
-**Location**
-
-Win7+: % SYSTEM ROOT%\System32\winevt\logs\Security.evtx
-
-**Interpretation**
-
-- Win7+:
-  - 4624 – Successful Logon
-  - 4625 – Failed Logon
-  - 4634 | 4647 – Successful Logoff
-  - 4648 – Logon using explicit credentials (runas)
-  - 4672 – Account logon with superuser rights (Administrator)
-  - 4720 – An account was created
-
-### Authentication Events
-
-**Description**
-
-Authentication Events identify where authentication of credentials occurred. They can be particularly useful when tracking local vs. domain account usage.
-
-**Location**
-
-Win7+: %SYSTEM ROOT%\System32\winevt\logs\Security.evtx
-
-**Interpretation**
-
-- Recorded on system that authenticated credentials
-  - Local Account/Workgroup = on workstation
-  - Domain/Active Directory = on domain controller
-- Event ID Codes (NTLM protocol)
-  - 4776: Successful/Failed account authentication
-- Event ID Codes (Kerberos protocol)
-  - 4768: Ticket Granting Ticket was granted (successful logon)
-  - 4769: Service Ticket requested (access to server resource)
-  - 4771: Pre-authentication failed (failed logon)
-
-### Logon Event Types
-
-**Description**
-
-Logon Events provide very specific information regarding the nature of account authorizations on a system. In addition to date, time, username, hostname, and success/failure status of a logon, Logon Events also enable us to determine by exactly what means a logon was attempted.
-
-**Location**
-
-Win7+: %SYSTEM ROOT%\System32\winevt\logs\Security.evtx
-
-**Interpretation**
-
-Event ID 4624 Logon Type 	 Explanation 2 Logon via console 3 Network Logon 4 Batch Logon 5 Windows Service Logon 7 Credentials used to unlock screen; RDP session reconnect 8 Network logon sending credentials (cleartext) 9 Different credentials used than logged on user 10 Remote interactive logon (RDP) 11 Cached credentials used to logon 12 Cached remote interactive (similar to Type 10) 13 Cached unlock (similar to Type 7)
-
-## Network Activity and Physical Location
-
-### Network History
-
-**Description**
-
-Identify networks to which the computer connected. Available information includes domain name/intranet name, SSID, first and last time connected, and Gateway MAC Address.
-
-**Location**
-
-- SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces
-- SOFTWARE\Microsoft\Windows NT\CurrentVersion\NetworkCards
-- SOFTWARE\Microsoft\Windows NT\CurrentVersion\NetworkList\ Signatures\Unmanaged
-- SOFTWARE\Microsoft\Windows NT\CurrentVersion\NetworkList\ Signatures\Managed
-- SOFTWARE\Microsoft\Windows NT\CurrentVersion\NetworkList\ Nla\Cache
-- SOFTWARE\Microsoft\Windows NT\CurrentVersion\NetworkList\ Profiles
-
-**Interpretation**
-
-- Multiple registry keys can be correlated to provide a rich picture of network activity.
-  - Interfaces info can be correlated with other keys via DhcpDomain value
-  - Signatures and Profiles keys are correlated via the network ProfileGUID value
-- Network data includes VPN connections
-- MAC Address of SSID for Gateway can assist with device geolocation
-- Network Profile NameType values:
-  - 6 (0x06) = Wired
-  - 23 (0x17) = VPN
-  - 71 (0x47) = Wireless
-  - 243 (0xF3) = Mobile Broadband
-
-### Browser URL Parameters
-
-**Description**
-
-Information leaked within browser history URL parameters can provide clues to captive portal sign-ins and other similar information sources that can identify connected networks and even approximate physical locations.
-
-**Example**
-
-https://maps.google.com/maps?hl=en-US&gl=US&um=1&ie=UTF- 8&fb=1&sa=X&geocode=KWv-o9E_nLJBBdixYmN41uvu&daddr=Hyat t+Place+Portland-Old+Port,+433+Fore+St,+Portland,+ME+04101
-
-**Location**
-
-Multiple – see the history information within the Browser Usage section
-
-### Timezone
-
-**Description**
-
-Registry data identifies the current system time zone. Event logs may be able to provide additional historical information.
-
-**Location**
-
-- SYSTEM\CurrentControlSet\Control\TimeZoneInformation
-- %SYSTEM ROOT%\System32\winevt\logs\System.evtx
-
-**Interpretation**
-
-- Some log files and artifact timestamps can only be correctly interpreted by knowing the system time zone
-- Event ID 6013 in the System.evtx log can provide information on historical time zone settings
-
-### WLAN Event Log
-
-**Description**
-
-Determine historical view of wireless networks associations.
-
-**Location**
-
-Win7+: Microsoft-Windows-WLAN-AutoConfig Operational.evtx
-
-**Interpretation**
-
-- Provides historical record of wireless network connections
-- SSID can be used to correlate and retrieve additional network information from Network History registry keys
-- Relevant Event IDs:
-  - 11000 – Wireless network association started
-  - 8001 – Successful connection to wireless network
-  - 8002 – Failed connection to wireless network
-  - 8003 – Disconnect from wireless network
-  - 6100 – Network diagnostics (System log)
-
-### Network Interfaces
-
-**Description**
-
-List available network interfaces and their last known configurations.
-
-**Location**
-
-- SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces
-- SOFTWARE\Microsoft\Windows NT\CurrentVersion\NetworkCards
-
-**Interpretation**
-
-- Interfaces key includes the last known IP address, DHCP and domain information for both physical and virtual network adapters. Subkeys may be present containing historical network data
-- NetworkCards key can provide more detail on network availability
-- The two keys are mapped via the interface GUID value
-- Unlikely to be a complete view of every connected network
-
-### System Resource Usage Monitor (SRUM)
-
-**Description**
-
-SRUM records 30 to 60 days of historical system performance including applications run, user accounts responsible, network connections, and bytes sent/received per application per hour.
-
-**Location**
-
-Win8+: C:\Windows\System32\SRU\SRUDB.dat
-
-**Interpretation**
-
-- SRUDB.dat is an Extensible Storage Engine database
-- Three tables in SRUDB.dat are particularly important:
-  - {973F5D5C-1D90-4944-BE8E-24B94231A174} = Network Data Usage
-  - {d10ca2fe-6fcf-4f6d-848e-b2e99266fa89} = Application Resource Usage
-  - {DD6636C4-8929-4683-974E-22C046A43763} = Network Connectivity Usage
-- Records data approx. once per hour, in batches
-
-## External Device / USB Usage
-
-### USB Device Identification
-
-**Description**
-
-Track USB devices plugged into a machine.
-
-**Location**
-
-- SYSTEM\CurrentControlSet\Enum\USBSTOR
-- SYSTEM\CurrentControlSet\Enum\USB
-- SYSTEM\CurrentControlSet\Enum\SCSI
-- SYSTEM\CurrentControlSet\Enum\HID
-
-**Interpretation**
-
-- Identify vendor, product, and version of a USB device plugged into a machine
-- Determine the first and last times a device was plugged into the machine
-- Devices that do not have a unique internal serial number will have an “&” in the second character of the serial number
-- The internal serial number provided in these keys may not match the serial number printed on the device
-- ParentIdPrefix links USB key to SCSI key
-- SCSI\&lt;ParentIdPrefix&gt;\Device Parameters\Partmgr\DiskId matches Partition/Diagnostic log and Windows Portable Devices key
-- Different versions of Windows store this data for different amounts of time. Windows 10/11 can store up to one year of data
-  - Some older data may be present in SYSTEM\Setup\Upgrade\PnP\CurrentControlSet\Control\DeviceMigration
-- HID key tracks peripherals connected to the system
-
-### Event Logs
-
-**Description**
-
-Removable device activity can be audited in multiple Windows event logs.
-
-**Location**
-
-Win7+: %SYSTEM ROOT%\System32\winevt\logs\System.evtx
-
-**Interpretation**
-
-- Event IDs 20001, 20003 – Plug and Play driver install attempted
-
-**Location**
-
-%SYSTEM ROOT%\System32\winevt\logs\Security.evtx
-
-**Interpretation**
-
-- 4663 – Attempt to access removable storage object (Security log)
-- 4656 – Failure to access removable storage object (Security log)
-- 6416 – A new external device was recognized on system (Security log)
-- Security log events are dependent on system audit settings
-
-**Location Connection Times**
-
-- Win10+: %SYSTEM ROOT%\System32\winevt\logs\Microsoft-Windows-Partition/Diagnostic.evtx
-
-**Interpretation**
-
-- Event ID 1006 is recorded for each device connect/disconnect
-
-### Drive Letter and Volume Name
-
-**Description**
-
-Discover the last drive letter and volume name of a device when it was plugged into the system.
-
-**Location**
-
-XP:
-- Find ParentIdPrefix – SYSTEM\CurrentControlSet\Enum\USBSTOR
-- Using ParentIdPrefix Discover Last Mount Point – SYSTEM\MountedDevices Win7+:
-- SOFTWARE\Microsoft\Windows Portable Devices\Devices
-- SYSTEM\MountedDevices Examine available drive letter values looking for a serial number match in value data
-- Win7+: SOFTWARE\Microsoft\Windows Search\VolumeInfoCache
-
-**Interpretation**
-
-- Only the last USB device mapped to a specific drive letter can be identified. Historical records not available.
-
-### User Information
-
-**Description**
-
-Identify user accounts tied to a unique USB Device.
-
-**Location**
-
-- Document device Volume GUID from SYSTEM\MountedDevices
-- NTUSER.DAT\Software\Microsoft\Windows\CurrentVersion\Explorer\MountPoints2
-
-**Interpretation**
-
-If a Volume GUID match is made within MountPoints2, we can conclude the associated user profile was logged in while that device was present.
-
-### Shortcut (LNK) Files
-
-**Description**
-
-Shortcut files are automatically created by Windows, tracking files and folders opened by a user.
-
-**Location**
-
-- XP: %USERPROFILE%\Recent
-- Win7+: %USERPROFILE%\AppData\Roaming\Microsoft\Windows\Recent\
-- Win7+: %USERPROFILE%\AppData\Roaming\Microsoft\Office\Recent\ Note these are primary locations of LNK files. They can also be found in other locations.
-
-**Interpretation**
-
-- Date/Time file of that name was first opened
-  - Creation Date of Shortcut (LNK) File
-- Date/Time file of that name was last opened
-  - Last Modification Date of Shortcut (LNK) File
-- LNK Target File (Internal LNK File Information) Data:
-  - Modified, Access, and Creation times of the target file
-  - Volume Information (Name, Type, Serial Number)
-  - Network Share information
-  - Original Location
-  - Name of System
-
-### Connection Timestamps
-
-**Description**
-
-Connection timestamps determine temporal usage of specific USB devices connected to a Windows Machine.
-
-**Location First Time**
-
-Plug and Play Log Files
-- XP: C:\Windows\setupapi.log
-- Win7+: C:\Windows\inf\setupapi.dev.log
-
-**Interpretation**
-
-- Search for Device Serial Number
-- Log File times are set to local time zone
-
-**Location First, Last, and Removal Times**
-
-- Win7+: SYSTEM\CurrentControlSet\Enum\USBSTOR\Disk&Ven_&Prod_\USBSerial#\Properties\ {83da6326-97a6-4088-9453-a19231573b29}\####
-- Win7+: SYSTEM\CurrentControlSet\Enum\SCSI\Ven_Prod_Version\USBSerial#\Properties\ {83da6326-97a6-4088-9453-a19231573b29}\####
-  - 0064 = First Install (Win7+)
-  - 0066 = Last Connected (Win8+)
-  - 0067 = Last Removal (Win8+)
-
-**Interpretation**
-
-Timestamps are stored in Windows 64-bit FILETIME format
-
-**Location Connection Times**
-
-- Win10+: %SYSTEM ROOT%\System32\winevt\logs\Microsoft-Windows-Partition/Diagnostic.evtx
-
-**Interpretation**
-
-- Event ID 1006 is recorded for each device connect/disconnect
-- Log cleared during major OS updates
-
-### Volume Serial Number (VSN)
-
-**Description**
-
-Discover the VSN assigned to the file system partition on the USB. (NOTE: This is not the USB Unique Serial Number, which is hardcoded into the device firmware, nor the serial number on any external labels attached to the device.)
-
-**Location**
-
-- SOFTWARE\Microsoft\WindowsNT\CurrentVersion\EMDMgmt
-  - Find a key match using Volume Name and USB Unique Serial Number:
-- Find last integer number in matching line
-- Convert decimal value to hex serial number
-  - This key is often missing from modern systems using SSD devices
-- Win10+: %SYSTEM ROOT%\System32\winevt\logs\Microsoft-Windows-Partition/Diagnostic.evtx
-  - Event ID 1006 may include VBR data, which contains the VSN
-  - VSN is 4 bytes located at offsets 0x43 (FAT), 0x64 (exFAT), or 0x48 (NTFS) within each VBR
-  - Log cleared during major OS updates
-
-**Interpretation**
-
-The VSN and device Volume Name can help correlate devices to specific files via shell items present in LNK files and registry locations.
-
-## System Information
-
-### Operating System Version
-
-**Description**
-
-This determines the operating system type, version, build number and installation dates for current installation and previous updates.
-
-**Location**
-
-- SOFTWARE\Microsoft\Windows NT\CurrentVersion
-- SYSTEM\Setup\Source OS
-
-**Interpretation**
-
-CurrentVersion key stores:
-- ProductName, EditionID – OS type
-- DisplayVersion, ReleaseId, CurrentBuildNumber – Version info
-- InstallTime – Installation time of current build (not original installation) Source OS keys are created for each historical OS update:
-- ProductName, EditionID – OS type
-- BuildBranch, ReleaseId, CurrentBuildNumber – Version info
-- InstallTime – Installation time of this build version
-- Times present in names of Source OS keys are extraneous: InstallTime = 64-bit FILETIME format (Win10+) InstallDate = Unix 32-bit epoch format (both times should be equivalent)
-
-### Computer Name
-
-**Description**
-
-This stores the hostname of the system in the ComputerName value.
-
-**Location**
-
-SYSTEM\CurrentControlSet\Control\ComputerName\ComputerName
-
-**Interpretation**
-
-Hostname can facilitate correlation of log data and other artifacts.
-
-### System Boot & Autostart Programs
-
-**Description**
-
-System Boot and Autostart Programs are lists of programs that will run on system boot or at user login.
-
-**Location**
-
-- NTUSER.DAT\Software\Microsoft\Windows\CurrentVersion\Run
-- NTUSER.DAT\Software\Microsoft\Windows\CurrentVersion\RunOnce
-- SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce
-- SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer\Run
-- SOFTWARE\Microsoft\Windows\CurrentVersion\Run
-- SYSTEM\CurrentControlSet\Services If Start value is set to 0x02, then service application will start at boot (0x00 for drivers)
-
-**Interpretation**
-
-- Useful to find malware and to audit installed software
-- This is not an exhaustive list of autorun locations
-
-### System Last Shutdown Time
-
-**Description**
-
-It is the last time the system was shutdown. On Windows XP, the number of shutdowns is also recorded.
-
-**Location**
-
-- SYSTEM\CurrentControlSet\Control\Windows (Shutdown Time)
-- SYSTEM\CurrentControlSet\Control\Watchdog\Display (Shutdown Count – WinXP only)
-
-**Interpretation**
-
-- Determining last shutdown time can help to detect user behavior and system anomalies
-- Windows 64-bit FILETIME format
-
-## SANS DFIR Curriculum Mentioned
-
-### Digital Forensics
-
-- FOR498 - Digital Acquisition and Rapid Triage - GBFA
-- FOR500 - Windows Forensic Analysis - GCFE
-- FOR518 - Mac and iOS Forensic Analysis & Incident Response - GIME
-- FOR585 - Smartphone Forensic Analysis In-Depth - GASF
-
-### Incident Response & Threat Hunting
-
-- FOR508 - Advanced Incident Response, Threat Hunting & Digital Forensics - GCFA
-- FOR509 - Enterprise Cloud Forensics & Incident Response - GCFR
-- FOR528 - Ransomware and Cyber Extortion
-- FOR572 - Advanced Network Forensics: Threat Hunting, Analysis & Incident Response - GNFA
-- FOR577 - Linux Incident Response and Threat Hunting
-- FOR578 - Cyber Threat Intelligence - GCTI
-- FOR589 - Cybercrime Intelligence
-- FOR608 - Enterprise-Class Incident Response & Threat Hunting - GEIR
-- FOR610 - REM: Malware Analysis Tools & Techniques - GREM
-- FOR710 - Reverse-Engineering Malware: Advanced Code Analysis
-- SEC504 - Hacker Tools, Techniques & Incident Handling - GCIH
-
+**PRO TIP:** Among the parsed data provided by WxTCmd is the column named "Content Info". As described above, this column contains the location and name of the opened file or resource. However, it also contains another valuable piece of information. In the example below, a file was opened from a "D:" drive. This ActivitiesCache.db file contains information for all computers synchronized to this Microsoft account, so several linked computers could have a "D:" drive. The example below provides the GUID (Global Unique Identifier) for the volume that stores that file. This means that the file can be tied back to a specific volume on a specific device.
